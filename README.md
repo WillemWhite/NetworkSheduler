@@ -28,7 +28,7 @@ To test the program, client and server applications were also written to which d
 а сервер, тем временем, с определенного порта их и принимает. Все происходит на локальном сервере.  
 В итоге, для тестирования планировщика, нужно просто указать соответствующие порты)  
 Commands:  
-```./client <port of localhost to which data will be sent>```
+```./client <port of localhost to which data will be sent>```  
 ```./server <port from which the local server will receive datagrams>```
 
 ## EXAMPLES
