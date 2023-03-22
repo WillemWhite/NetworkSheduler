@@ -37,4 +37,4 @@ Commands:
 <image src="/images/working_server1.png" alt="Working server1">
 <image src="/images/working_server2.png" alt="Working server2">
 <image src="/images/working_server3.png" alt="Working server3">
-<image src="/images/working_server3.png" alt="Working Network Sheduler">
+<image src="/images/working_sheduler.png" alt="Working Network Sheduler">
