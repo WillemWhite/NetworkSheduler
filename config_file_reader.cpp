@@ -1,6 +1,0 @@
-#include <fstream>
-
-bool ReadConfigFile()
-{
-
-}
