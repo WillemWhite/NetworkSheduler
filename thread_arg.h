@@ -6,7 +6,9 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <cstring>
+#include <string>
 #include <queue>
+#include <list>
 
 #define MSG_MAX_SIZE 64*1024
 
@@ -18,42 +20,44 @@ enum {
 
 struct SndThreadArg
 {
-    int threadNum;
-    int *sockfd;
+    pthread_mutex_t *mtx;
+    int maxDatagramInSec;
     struct sockaddr_in *addr;
+    std::vector<std::string> *ipVec;
+    std::vector<int> *sndPortsVec;
     std::queue<char *> *msgQueue;
     std::queue<int> *numOfBytesQueue;
     int flag;
 
 public:
     SndThreadArg()
-        : threadNum(0),
-          sockfd(new int),
+        : mtx(nullptr),
+          maxDatagramInSec(0),
           addr(new struct sockaddr_in()),
+          ipVec(nullptr),
+          sndPortsVec(nullptr),
           msgQueue(new std::queue<char *>()),
           numOfBytesQueue(new std::queue<int>()),
           flag(CONTINUE_THREAD) { memset(addr, 0, sizeof(*addr)); }
-    ~SndThreadArg() { close(*sockfd); delete sockfd; delete addr, delete msgQueue; }
+    ~SndThreadArg() { delete addr, delete msgQueue; }
 };
 
 struct RcvThreadArg
 {
+    pthread_mutex_t *mtx;
     int maxDatagramInSec;
-    int *sockfd;
-    int numOfServers;
     struct sockaddr_in *addr;
-    SndThreadArg *sndThreadArgArr;
+    SndThreadArg *sndThreadArg;
     int flag;
 
 public:
     RcvThreadArg()
-        : maxDatagramInSec(0),
-          sockfd(new int),
-          numOfServers(0),
+        : mtx(nullptr),
+          maxDatagramInSec(0),
           addr(new struct sockaddr_in()),
-          sndThreadArgArr(nullptr),
+          sndThreadArg(nullptr),
           flag(CONTINUE_THREAD) { memset(addr, 0, sizeof(*addr)); }
-    ~RcvThreadArg() { close(*sockfd); delete sockfd; delete addr;}
+    ~RcvThreadArg() { delete addr;}
 };
 
 #endif // THREAD_ARG_H

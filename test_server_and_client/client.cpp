@@ -38,13 +38,18 @@ int main (int argc, char *argv[])
 
     char buffer[MSG_MAX_SIZE];
     bzero(buffer, MSG_MAX_SIZE);
-    strcpy(buffer, "Hello from client!");
+    strcpy(buffer, "Hello from client! ");
+
+    int i = 0;
     while (true)
     {
+        i++;
+	    const char * numStr = std::to_string(i).c_str();
+        strcpy(buffer, numStr);
         sendto(sockfd, buffer, MSG_MAX_SIZE-100, 0, 
             reinterpret_cast<struct sockaddr *>(&server_addr), sizeof(server_addr));
         cout << "Data sent from client: " << buffer << endl;
-        sleep(1);
+        usleep(100000);
     }
 
     // bzero(buffer, MSG_MAX_SIZE);

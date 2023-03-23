@@ -1,6 +1,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <cstring>
 #include <ctime>
 #include <cmath>
@@ -9,8 +10,27 @@
 void* ReceivingThread(void* arg)
 {
     RcvThreadArg *threadArg = reinterpret_cast<RcvThreadArg *>(arg);
-    cout << "Started receiving thread\n";
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("receiving socket error");
+        pthread_exit(reinterpret_cast<void *>(EXIT_FAILURE));
+    }
+
+    int res;
+    res = bind(sockfd,
+               reinterpret_cast<struct sockaddr *>(threadArg->addr),
+               sizeof(*threadArg->addr));
+    if (res < 0) {
+        perror("bind error");
+        pthread_exit(reinterpret_cast<void *>(EXIT_FAILURE));
+    }
+
+    pthread_mutex_lock(threadArg->mtx);
+    cout << "Started receiving thread" << endl;
+    pthread_mutex_unlock(threadArg->mtx);
+
     char buffer[MSG_MAX_SIZE];
+    int numOfRcvBytes;
 
     bool isProceed = true;
     while(isProceed)
@@ -19,37 +39,67 @@ void* ReceivingThread(void* arg)
         {
         case CONTINUE_THREAD:
         {
-            double timeSpent = 0.0;
             clock_t begin = clock();
 
             for (int i = 0; i < threadArg->maxDatagramInSec && isProceed; i++)
             {
                 memset(buffer, 0, MSG_MAX_SIZE);
-                int numOfRcvBytes = recv(*threadArg->sockfd, buffer, MSG_MAX_SIZE, 0);
+                numOfRcvBytes = recv(sockfd, buffer, MSG_MAX_SIZE, 0);
+
+                pthread_mutex_lock(threadArg->mtx);
                 cout << "Data received to server: " << buffer << ", "
                      << numOfRcvBytes << " bytes" << endl;
+                pthread_mutex_unlock(threadArg->mtx);
 
-                // Тут реализовал случайный выбор следующего сервера по
-                // относительно равномерному распределению. Можно и, конечно,
-                // выбирать сервер с наименьшей нагрузкой, но решил поэкспериментировать.
-                int sendingThreadIndex = rand() % threadArg->numOfServers;
                 char *sendingMsg = new char[numOfRcvBytes];
                 memmove(sendingMsg, buffer, numOfRcvBytes);
-                SndThreadArg *sndThreadArg = &threadArg->sndThreadArgArr[sendingThreadIndex];
+
+                pthread_mutex_lock(threadArg->mtx);
+                SndThreadArg *sndThreadArg = threadArg->sndThreadArg;
                 sndThreadArg->numOfBytesQueue->push(numOfRcvBytes);
                 sndThreadArg->msgQueue->push(sendingMsg);
                 sndThreadArg->flag = SEND_DATA;
+                pthread_mutex_unlock(threadArg->mtx);
             }
 
             clock_t end = clock();
-            timeSpent += static_cast<double>(end-begin) / CLOCKS_PER_SEC;
-            if (timeSpent > 1)
-                break;
-            else {
-                int timeToSleep = round((1.0 - timeSpent) * 1000000);
-                usleep(timeToSleep);
-                break;
+            double timeSpent = static_cast<double>(end-begin) / CLOCKS_PER_SEC;
+
+            // Пропускаем сообщения, если достигнули максимума
+            while (timeSpent < 1)
+            {
+                memset(buffer, 0, MSG_MAX_SIZE);
+                numOfRcvBytes = recv(sockfd, buffer, MSG_MAX_SIZE, 0);
+
+                end = clock();
+                timeSpent = static_cast<double>(end-begin) / CLOCKS_PER_SEC;
+
+                if (timeSpent < 1) {
+                    pthread_mutex_lock(threadArg->mtx);
+                    cout << "Msg skipped..." << endl;
+                    pthread_mutex_unlock(threadArg->mtx);
+                    continue;
+                }
+                else {
+                    pthread_mutex_lock(threadArg->mtx);
+                    cout << "Data received to server: " << buffer << ", "
+                         << numOfRcvBytes << " bytes" << endl;
+                    pthread_mutex_unlock(threadArg->mtx);
+
+                    char *sendingMsg = new char[numOfRcvBytes];
+                    memmove(sendingMsg, buffer, numOfRcvBytes);
+
+                    pthread_mutex_lock(threadArg->mtx);
+                    SndThreadArg *sndThreadArg = threadArg->sndThreadArg;
+                    sndThreadArg->numOfBytesQueue->push(numOfRcvBytes);
+                    sndThreadArg->msgQueue->push(sendingMsg);
+                    sndThreadArg->flag = SEND_DATA;
+                    pthread_mutex_unlock(threadArg->mtx);
+
+                    break;
+                }
             }
+            break;
         }
         case STOP_THREAD:
             isProceed = false;
@@ -59,21 +109,32 @@ void* ReceivingThread(void* arg)
         }
     }
 
-    cout << "Stoped receiving thread\n";
+    close(sockfd);
+    pthread_mutex_lock(threadArg->mtx);
+    cout << "Stoped receiving thread" << endl;
+    pthread_mutex_unlock(threadArg->mtx);
+
     pthread_exit(0);
 }
 
 void* SendingThread(void* arg)
 {
     SndThreadArg *threadArg = reinterpret_cast<SndThreadArg *>(arg);
-    std::string outputMsg = "Started ";
-    outputMsg += std::to_string(threadArg->threadNum);
-    outputMsg += " sending thread\n";
-    cout << outputMsg;
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("sending socket error");
+        pthread_exit(reinterpret_cast<void *>(EXIT_FAILURE));
+    }
 
+    pthread_mutex_lock(threadArg->mtx);
+    cout << "Started sending thread" << endl;
+    pthread_mutex_unlock(threadArg->mtx);
+
+    int nextAddrId = 0;
     bool isProceed = true;
     while(isProceed)
     {
+        pthread_mutex_lock(threadArg->mtx);
         switch(threadArg->flag)
         {
         case CONTINUE_THREAD:
@@ -82,12 +143,23 @@ void* SendingThread(void* arg)
         {
             char *msg = threadArg->msgQueue->front();
             int numOfSendingBytes = threadArg->numOfBytesQueue->front();
-            int res = sendto(*threadArg->sockfd, msg,
+            threadArg->msgQueue->pop();
+            threadArg->numOfBytesQueue->pop();
+
+            const char * nextIp = (*threadArg->ipVec)[nextAddrId].c_str();
+            int nextPort = (*threadArg->sndPortsVec)[nextAddrId];
+            threadArg->addr->sin_addr.s_addr = inet_addr(nextIp);
+            threadArg->addr->sin_port = htons(nextPort);
+
+            int res = sendto(sockfd, msg,
                              numOfSendingBytes, 0,
                              reinterpret_cast<struct sockaddr *>(threadArg->addr),
                              sizeof(*threadArg->addr));
-            threadArg->msgQueue->pop();
-            threadArg->numOfBytesQueue->pop();
+            cout << "Data sent to " << nextAddrId + 1 << " server" << endl;
+
+            delete msg;
+            nextAddrId = (nextAddrId + 1) % threadArg->ipVec->size();
+            threadArg->flag = CONTINUE_THREAD;
 
             if (res == -1) {
                 perror("sending data failed");
@@ -95,8 +167,6 @@ void* SendingThread(void* arg)
                 break;
             }
 
-            delete msg;
-            threadArg->flag = CONTINUE_THREAD;
             break;
         }
         case STOP_THREAD:
@@ -105,11 +175,15 @@ void* SendingThread(void* arg)
         default:
             break;
         }
+        pthread_mutex_unlock(threadArg->mtx);
+
+        usleep(round((1/threadArg->maxDatagramInSec)*1000000));
     }
 
-    outputMsg = "Stoped ";
-    outputMsg += std::to_string(threadArg->threadNum);
-    outputMsg += " sending thread\n";
-    cout << outputMsg;
+    close(sockfd);
+    pthread_mutex_lock(threadArg->mtx);
+    cout << "Stoped sending thread" << endl;
+    pthread_mutex_unlock(threadArg->mtx);
+
     pthread_exit(0);
 }

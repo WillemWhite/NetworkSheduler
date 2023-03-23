@@ -8,98 +8,52 @@
 
 NetworkSheduler::NetworkSheduler(const char *configFile)
 {
-    int numOfServers;
-    std::list<std::string> ipList;
-    std::list<int> sndPortsList;
-    int rcvPort;
-    int numOfDatagramsInSec;
-    NetworkSheduler::readConfig(configFile, numOfServers, ipList,
-                                sndPortsList, rcvPort, numOfDatagramsInSec);
-    this->numOfServers = numOfServers;
-    this->numOfDatagramsInSec = numOfDatagramsInSec;;
+    this->configFile = configFile;
+    NetworkSheduler::readConfig();
 
-    sndThreadArgArr = new SndThreadArg[numOfServers];
-    for (int i = 0; i < numOfServers; i++)
-    {
-        sndThreadArgArr[i].threadNum = i+1;
+    mtx = PTHREAD_MUTEX_INITIALIZER;
 
-        *sndThreadArgArr[i].sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-        if (*sndThreadArgArr[i].sockfd < 0) {
-            perror("sending socket error");
-            exit(EXIT_FAILURE);
-        }
+    sndThreadArg.mtx = &mtx;
+    sndThreadArg.maxDatagramInSec = maxDatagramInSec;
+    sndThreadArg.addr->sin_family = AF_INET;
+    sndThreadArg.ipVec = &ipVec;
+    sndThreadArg.sndPortsVec = &sndPortsVec;
 
-        sndThreadArgArr[i].addr->sin_family = AF_INET;
-        sndThreadArgArr[i].addr->sin_port = htons(sndPortsList.front());
-        sndThreadArgArr[i].addr->sin_addr.s_addr = inet_addr(ipList.front().c_str());
-
-        sndPortsList.pop_front();
-        ipList.pop_front();
-    }
-
-    rcvThreadArg.maxDatagramInSec = this->numOfDatagramsInSec;
-
-    *rcvThreadArg.sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (*rcvThreadArg.sockfd < 0) {
-        perror("receiving socket error");
-        exit(EXIT_FAILURE);
-    }
-
-    rcvThreadArg.numOfServers = this->numOfServers;
-
-    (*rcvThreadArg.addr).sin_family = AF_INET;
-    (*rcvThreadArg.addr).sin_port = htons(rcvPort);
-    (*rcvThreadArg.addr).sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    rcvThreadArg.sndThreadArgArr = this->sndThreadArgArr;
-
-    int res;
-    res = bind(*rcvThreadArg.sockfd,
-               reinterpret_cast<struct sockaddr *>(rcvThreadArg.addr),
-               sizeof(*rcvThreadArg.addr));
-    if (res < 0) {
-        perror("bind error");
-        exit(EXIT_FAILURE);
-    }
+    rcvThreadArg.mtx = &mtx;
+    rcvThreadArg.maxDatagramInSec = maxDatagramInSec;
+    rcvThreadArg.addr->sin_family = AF_INET;
+    rcvThreadArg.addr->sin_addr.s_addr = inet_addr("127.0.0.1");
+    rcvThreadArg.addr->sin_port = htons(rcvPort);
+    rcvThreadArg.sndThreadArg = &sndThreadArg;
 }
 
 NetworkSheduler::~NetworkSheduler()
 {
+    pthread_mutex_destroy(&mtx);
+
     rcvThreadArg.flag = STOP_THREAD;
     pthread_join(rcvThreadId, 0);
-    for (int i = 0; i < numOfServers; i++)
-        sndThreadArgArr[i].flag = STOP_THREAD;
-    for (int i = 0; i < numOfServers; i++)
-        pthread_join(sndThreadIdArr[i], 0);
 
-    delete [] sndThreadArgArr;
-    delete [] sndThreadIdArr;
+    sndThreadArg.flag = STOP_THREAD;
+    pthread_join(sndThreadId, 0);
 }
 
 void NetworkSheduler::start()
 {
-    if (int ret = pthread_create(&rcvThreadId,
-                                NULL, ReceivingThread, &rcvThreadArg) != 0) {
-        cout << "pthread_create error for rcv thread: " << strerror(ret) << endl;
+    if (int ret = pthread_create(&rcvThreadId, NULL,
+                                 ReceivingThread, &rcvThreadArg) != 0) {
+        cout << "pthread_create error for receiving thread: " << strerror(ret) << endl;
         exit(EXIT_FAILURE);
     }
 
-    sndThreadIdArr = new pthread_t[numOfServers];
-    for (int i = 0; i < numOfServers; i++)
-    {
-        if(int ret = pthread_create(&sndThreadIdArr[i], NULL,
-                                    SendingThread, &sndThreadArgArr[i]) != 0) {
-            cout << "pthread_create error for " << i+1 << " snd thread: "
-                 << strerror(ret) << endl;
-            exit(EXIT_FAILURE);
-        }
+    if(int ret = pthread_create(&sndThreadId, NULL,
+                                SendingThread, &sndThreadArg) != 0) {
+        cout << "pthread_create error for sending thread: " << strerror(ret) << endl;
+        exit(EXIT_FAILURE);
     }
 }
 
-bool NetworkSheduler::readConfig(const char *configFile, int &numOfServers,
-                                 std::list<std::string> &ipList,
-                                 std::list<int> &sndPortsList,
-                                 int &rcvPort, int &numOfDatagramsInSec)
+bool NetworkSheduler::readConfig()
 {
     std::ifstream in(configFile);
     if (!in.is_open()) {
@@ -121,7 +75,7 @@ bool NetworkSheduler::readConfig(const char *configFile, int &numOfServers,
         if (param == "SENDING_ADDRESS")
             sendingAddrList.push_back(value);
         if (param == "NUM_OF_DATAGRAMS_PER_SEC")
-            numOfDatagramsInSec = stoi(value);
+            maxDatagramInSec = stoi(value);
     }
 
     in.close();
@@ -133,9 +87,9 @@ bool NetworkSheduler::readConfig(const char *configFile, int &numOfServers,
         sendingAddrList.pop_front();
         int sepIndex;
         sepIndex = addr.find(":");
-        ipList.push_front(addr.substr(0, sepIndex));
+        ipVec.push_back(addr.substr(0, sepIndex));
         addr.replace(0, sepIndex + 1, "");
-        sndPortsList.push_front(stoi(addr));
+        sndPortsVec.push_back(stoi(addr));
     }
 
     return true;

@@ -12,21 +12,24 @@
 
 class NetworkSheduler
 {
+    const char *configFile;
+    int rcvPort;
     int numOfServers;
-    int numOfDatagramsInSec;
+    int maxDatagramInSec;
+    std::vector<std::string> ipVec;
+    std::vector<int> sndPortsVec;
+
+    pthread_mutex_t mtx;
     RcvThreadArg rcvThreadArg;
-    SndThreadArg *sndThreadArgArr;
+    SndThreadArg sndThreadArg;
     pthread_t rcvThreadId;
-    pthread_t *sndThreadIdArr;
+    pthread_t sndThreadId;
 
 public:
     NetworkSheduler(const char *configFile);
     ~NetworkSheduler();
     void start();
-    static bool readConfig(const char *configFile, int &numOfServers,
-                           std::list<std::string> &iplist,
-                           std::list<int> &sndPortsList,
-                           int &rcvPort, int &numOfDatagramsInSec);
+    bool readConfig();
 };
 
 #endif // NETWORK_SHEDULER_H
