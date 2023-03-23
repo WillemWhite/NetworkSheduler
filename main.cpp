@@ -8,7 +8,8 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    NetworkSheduler *sheduler = new NetworkSheduler(argv[0]);
+    NetworkSheduler *sheduler = new NetworkSheduler(argv[1]);
+
     sheduler->start();
 
     getchar();
