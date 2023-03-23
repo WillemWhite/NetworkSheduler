@@ -8,7 +8,7 @@ through the rand() function.
 Ради эксперимента решил распределять датаграммы по равномерному закону распределения через соответствующую функцию rand())
 
 ## USAGE
-**First** you need to fill in the configuration file:  
+**First** you need to fill the configuration file:  
 (По-русски: здесь представлена структура конфигурационного файла)
 ```
 RECEIVING_PORT <port like 8888>
@@ -19,7 +19,7 @@ SENDING_ADDRESS <address like 127.0.0.1:8888>
 NUM_OF_DATAGRAMS_PER_SEC <maximum number of datagrams arriving at the receive port like 100>
 ```  
 **Then** you need to open the scheduler itself with the command:  
-(По-русски: вызов функции)
+(По-русски: вызов программы)
 ```./NetworkSheduler <config filename>``` 
 
 ## TESTING
@@ -28,7 +28,7 @@ To test the program, client and server applications were also written to which d
 а сервер, тем временем, с определенного порта их и принимает. Все происходит на локальном сервере.  
 В итоге, для тестирования планировщика, нужно просто указать соответствующие порты)  
 Commands:  
-```./client <port of localhost to which data will be sent>```
+```./client <port of localhost to which data will be sent>```  
 ```./server <port from which the local server will receive datagrams>```
 
 ## EXAMPLES
