@@ -33,75 +33,96 @@ void* ReceivingThread(void* arg)
     int numOfRcvBytes;
 
     bool isProceed = true;
+    bool isBeginOfWork = true;
+    bool isMaxLoad = false;
+    int pos = 0;
+    clock_t **msgClockArr = new clock_t *[threadArg->maxDatagramInSec];
+    for (int i = 0; i < threadArg->maxDatagramInSec; i++)
+        msgClockArr[i] = nullptr;
     while(isProceed)
     {
         switch(threadArg->flag)
         {
         case CONTINUE_THREAD:
         {
-            clock_t begin = clock();
-
-            for (int i = 0; i < threadArg->maxDatagramInSec && isProceed; i++)
+            for (int i = 0; i < threadArg->maxDatagramInSec; i++)
             {
-                memset(buffer, 0, MSG_MAX_SIZE);
-                numOfRcvBytes = recv(sockfd, buffer, MSG_MAX_SIZE, 0);
-
-                pthread_mutex_lock(threadArg->mtx);
-                cout << "Data received to server: " << buffer << ", "
-                     << numOfRcvBytes << " bytes" << endl;
-                pthread_mutex_unlock(threadArg->mtx);
-
-                char *sendingMsg = new char[numOfRcvBytes];
-                memmove(sendingMsg, buffer, numOfRcvBytes);
-
-                pthread_mutex_lock(threadArg->mtx);
-                SndThreadArg *sndThreadArg = threadArg->sndThreadArg;
-                sndThreadArg->numOfBytesQueue->push(numOfRcvBytes);
-                sndThreadArg->msgQueue->push(sendingMsg);
-                sndThreadArg->flag = SEND_DATA;
-                pthread_mutex_unlock(threadArg->mtx);
-            }
-
-            clock_t end = clock();
-            double timeSpent = static_cast<double>(end-begin) / CLOCKS_PER_SEC;
-
-            // Пропускаем сообщения, если достигнули максимума
-            while (timeSpent < 1)
-            {
-                memset(buffer, 0, MSG_MAX_SIZE);
-                numOfRcvBytes = recv(sockfd, buffer, MSG_MAX_SIZE, 0);
-
-                end = clock();
-                timeSpent = static_cast<double>(end-begin) / CLOCKS_PER_SEC;
-
-                if (timeSpent < 1) {
-                    pthread_mutex_lock(threadArg->mtx);
-                    cout << "Msg skipped..." << endl;
-                    pthread_mutex_unlock(threadArg->mtx);
-                    continue;
-                }
-                else {
-                    pthread_mutex_lock(threadArg->mtx);
-                    cout << "Data received to server: " << buffer << ", "
-                         << numOfRcvBytes << " bytes" << endl;
-                    pthread_mutex_unlock(threadArg->mtx);
-
-                    char *sendingMsg = new char[numOfRcvBytes];
-                    memmove(sendingMsg, buffer, numOfRcvBytes);
-
-                    pthread_mutex_lock(threadArg->mtx);
-                    SndThreadArg *sndThreadArg = threadArg->sndThreadArg;
-                    sndThreadArg->numOfBytesQueue->push(numOfRcvBytes);
-                    sndThreadArg->msgQueue->push(sendingMsg);
-                    sndThreadArg->flag = SEND_DATA;
-                    pthread_mutex_unlock(threadArg->mtx);
-
+                if (msgClockArr[i] == nullptr) {
+                    msgClockArr[i] = new clock_t;
+                    pos = i;
+                    isBeginOfWork = true;
+                    isMaxLoad = false;
                     break;
                 }
+                isBeginOfWork = false;
             }
+
+            if (!isBeginOfWork) {
+                clock_t now = clock();
+                double timeSpent = 0.0;
+                for (int i = 0; i < threadArg->maxDatagramInSec; i++)
+                {
+                    if (i == 0) {
+                        int end = threadArg->maxDatagramInSec - 1;
+                        timeSpent += static_cast<double>
+                                (now - *msgClockArr[end]) / CLOCKS_PER_SEC;
+                        continue;
+                    }
+
+                    clock_t nextMsgTime = *msgClockArr[i];
+                    clock_t prevMsgTime = *msgClockArr[i - 1];
+                    timeSpent += static_cast<double>(nextMsgTime - prevMsgTime) / CLOCKS_PER_SEC;
+                }
+
+                if (timeSpent < 1)
+                    isMaxLoad = true;
+                else
+                    isMaxLoad = false;
+            }
+
+            if (isMaxLoad && !isBeginOfWork) {
+                recv(sockfd, buffer, MSG_MAX_SIZE, 0);
+                memset(buffer, 0, MSG_MAX_SIZE);
+
+                pthread_mutex_lock(threadArg->mtx);
+                cout << "Msg skipped..." << endl;
+                pthread_mutex_unlock(threadArg->mtx);
+
+                break;
+            }
+
+            numOfRcvBytes = recv(sockfd, buffer, MSG_MAX_SIZE, 0);
+
+            if (!isBeginOfWork) {
+                for (int i = 0; i < threadArg->maxDatagramInSec - 1; i++)
+                    *msgClockArr[i] = *msgClockArr[i+1];
+                *msgClockArr[pos] = clock();
+            }
+            else
+                *msgClockArr[pos] = clock();
+
+            pthread_mutex_lock(threadArg->mtx);
+            cout << "Data received to server: " << buffer << ", "
+                 << numOfRcvBytes << " bytes" << endl;
+            pthread_mutex_unlock(threadArg->mtx);
+
+            char *sendingMsg = new char[numOfRcvBytes];
+            memmove(sendingMsg, buffer, numOfRcvBytes);
+            memset(buffer, 0, MSG_MAX_SIZE);
+
+            pthread_mutex_lock(threadArg->mtx);
+            SndThreadArg *sndThreadArg = threadArg->sndThreadArg;
+            sndThreadArg->numOfBytesQueue->push(numOfRcvBytes);
+            sndThreadArg->msgQueue->push(sendingMsg);
+            sndThreadArg->flag = SEND_DATA;
+            pthread_mutex_unlock(threadArg->mtx);
+
             break;
         }
         case STOP_THREAD:
+            for (int i = 0; i < threadArg->maxDatagramInSec; i++)
+                delete msgClockArr[i];
+            delete [] msgClockArr;
             isProceed = false;
             break;
         default:
@@ -130,8 +151,8 @@ void* SendingThread(void* arg)
     cout << "Started sending thread" << endl;
     pthread_mutex_unlock(threadArg->mtx);
 
-    int nextAddrId = 0;
     bool isProceed = true;
+    int nextAddrId = 0;
     while(isProceed)
     {
         pthread_mutex_lock(threadArg->mtx);

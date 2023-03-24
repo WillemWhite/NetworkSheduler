@@ -12,7 +12,8 @@ int main(int argc, char *argv[])
 
     sheduler->start();
 
-    getchar();
+    while(true)
+        getchar();
 
     return 0;
 }
